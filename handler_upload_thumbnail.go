@@ -1,10 +1,12 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -43,7 +45,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	defer file.Close()
 
 	fileType := header.Header.Get("Content-Type")
-	fileData, err := io.ReadAll(file)
+
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Unable to parse form file", err)
 		return
@@ -59,11 +61,28 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusUnauthorized, "No access", err)
 		return
 	}
+	d := strings.Split(fileType, "/")
+	fileExtension := d[1]
+	if fileExtension == "" {
 
-	base64Image := base64.StdEncoding.EncodeToString(fileData)
+		respondWithError(w, http.StatusInternalServerError, "Internal server error", err)
+		return
+	}
 
-	thumbnailURL := fmt.Sprintf("data:%s;base64,%s", fileType, base64Image)
-	video.ThumbnailURL = &thumbnailURL
+	assetPath := filepath.Join(cfg.assetsRoot, fmt.Sprintf("%s.%s", video.ID, fileExtension))
+	assetFile, err := os.Create(assetPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Internal server error", err)
+		return
+	}
+	_, err = io.Copy(assetFile, file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Internal server error", err)
+		return
+	}
+
+	thumbnailUrl := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, video.ID, fileExtension)
+	video.ThumbnailURL = &thumbnailUrl
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Internal server error", err)
