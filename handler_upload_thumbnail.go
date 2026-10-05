@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,6 +63,14 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusUnauthorized, "No access", err)
 		return
 	}
+
+	mediaType, _, err := mime.ParseMediaType(fileType)
+
+	if mediaType != "image/jpeg" && mediaType != "image/png" {
+		respondWithError(w, http.StatusBadRequest, "Incorrect file type", err)
+		return
+	}
+	log.Println(mediaType)
 	d := strings.Split(fileType, "/")
 	fileExtension := d[1]
 	if fileExtension == "" {
@@ -81,8 +91,8 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	thumbnailUrl := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, video.ID, fileExtension)
-	video.ThumbnailURL = &thumbnailUrl
+	thumbnailURL := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, video.ID, fileExtension)
+	video.ThumbnailURL = &thumbnailURL
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Internal server error", err)
