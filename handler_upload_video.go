@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -75,12 +79,29 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Failed to copy file", err)
 		return
 	}
+	videoAspectRatio, err := getVideoAspectRatio(tempFile.Name())
+
 	tempFile.Seek(0, io.SeekStart)
 
 	randomBytes := make([]byte, 32)
 	rand.Read(randomBytes)
 
 	randomFileName := base64.RawURLEncoding.EncodeToString(randomBytes) + ".mp4"
+	if err != nil {
+		log.Print(err)
+		respondWithError(w, http.StatusInternalServerError, "Failed to get aspect ratio", err)
+		return
+	}
+
+	switch videoAspectRatio {
+	case "16/9":
+		randomFileName = "landscape/" + randomFileName
+	case "9/16":
+		randomFileName = "portrait/" + randomFileName
+	default:
+		randomFileName = "other/" + randomFileName
+	}
+
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
 		Key:         &randomFileName,
@@ -99,4 +120,45 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Save video error", err)
 		return
 	}
+}
+
+func getVideoAspectRatio(filePath string) (string, error) {
+	// ffprobe -v error -print_format json -show_streams /mnt/data500/projects/bootdev/tubely/samples/boots-video-vertical.mp4
+	log.Print("file path: ", filePath)
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
+
+	log.Print("before")
+	buffer := make([]byte, 0)
+	buff := bytes.NewBuffer(buffer)
+	log.Print("after")
+	cmd.Stdout = buff
+
+	log.Print("here")
+	if err := cmd.Run(); err != nil {
+		log.Print("Error running the command: ", err)
+		return "", err
+	}
+
+	log.Print("After run")
+
+	videoSize := struct {
+		Streams []struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		} `json:"streams"`
+	}{}
+
+	if err := json.Unmarshal(buff.Bytes(), &videoSize); err != nil {
+		log.Print("Error Unmarshal", err)
+		return "", err
+	}
+
+	size := videoSize.Streams[0]
+	if 16/9 == size.Width/size.Height {
+		return "16/9", nil
+	}
+	if 9/16 == size.Width/size.Height {
+		return "9/16", nil
+	}
+	return "other", nil
 }
